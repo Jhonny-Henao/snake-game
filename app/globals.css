@@ -6,18 +6,10 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  -webkit-tap-highlight-color: transparent;
-  -webkit-touch-callout: none;
-  user-select: none;
 }
 
 body {
   overflow-x: hidden;
-  overscroll-behavior: none;
-  touch-action: pan-x pan-y;
-}
-input, textarea {
-  user-select: text;
 }
 
 @keyframes blob {
@@ -76,4 +68,3 @@ input, textarea {
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
 }
-
