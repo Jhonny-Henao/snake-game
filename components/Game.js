@@ -37,6 +37,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic' }) {
   const [isPaused, setIsPaused] = useState(false);
   const [speed, setSpeed] = useState(150);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
   
   const directionRef = useRef(direction);
   const currentTheme = THEMES[theme];
@@ -47,15 +48,24 @@ export default function Game({ playerName, onGameOver, theme = 'classic' }) {
   const moveSoundRef = useRef(null);
   const backgroundMusicRef = useRef(null);
 
-  // Inicializar sonidos y música
-// Inicializar sonidos y música
+  // Detectar si es móvil
   useEffect(() => {
-    // Sonidos de efectos
-eatSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');    gameOverSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3'); // Sonido simple de error/perdida
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Inicializar sonidos y música
+  useEffect(() => {
+    eatSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');    
+		gameOverSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3'); // Sonido simple de error/perdida
     moveSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2997/2997-preview.mp3');
     
     // Música de fondo tranquila y constante
-backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Chad_Crouch/Arps/Chad_Crouch_-_Shipping_Lanes.mp3');    
+		backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Chad_Crouch/Arps/Chad_Crouch_-_Shipping_Lanes.mp3');    
     // Configurar volúmenes
     eatSoundRef.current.volume = 0.2;
     gameOverSoundRef.current.volume = 0.3;
@@ -63,12 +73,10 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
     backgroundMusicRef.current.volume = 0.2;
     backgroundMusicRef.current.loop = true;
     
-    // Iniciar música de fondo
     if (soundEnabled) {
       backgroundMusicRef.current.play().catch(e => console.log('Audio play failed:', e));
     }
     
-    // Cleanup al desmontar
     return () => {
       if (backgroundMusicRef.current) {
         backgroundMusicRef.current.pause();
@@ -77,7 +85,6 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
     };
   }, []);
 
-  // Controlar música cuando cambie soundEnabled
   useEffect(() => {
     if (backgroundMusicRef.current) {
       if (soundEnabled && !isPaused && !gameOver) {
@@ -106,6 +113,18 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
     return newFood;
   }, [snake]);
 
+  // Función para cambiar dirección
+  const changeDirection = useCallback((newDirection) => {
+    const opposite = directionRef.current.x === -newDirection.x && 
+                    directionRef.current.y === -newDirection.y;
+    if (!opposite && !gameOver && !isPaused) {
+      setDirection(newDirection);
+      directionRef.current = newDirection;
+      playSound(moveSoundRef);
+    }
+  }, [gameOver, isPaused]);
+
+  // Controles de teclado
   useEffect(() => {
     const handleKeyPress = (e) => {
       if (e.key === ' ') {
@@ -132,30 +151,31 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
 
       const newDirection = keyMap[e.key];
       if (newDirection) {
-        const opposite = directionRef.current.x === -newDirection.x && 
-                        directionRef.current.y === -newDirection.y;
-        if (!opposite) {
-          setDirection(newDirection);
-          directionRef.current = newDirection;
-          playSound(moveSoundRef);
-        }
+        changeDirection(newDirection);
       }
     };
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [soundEnabled]);
+  }, [changeDirection]);
 
+  // Controles táctiles mejorados
   const [touchStart, setTouchStart] = useState(null);
 
   const handleTouchStart = (e) => {
+    e.preventDefault();
     setTouchStart({
       x: e.touches[0].clientX,
       y: e.touches[0].clientY
     });
   };
 
+  const handleTouchMove = (e) => {
+    e.preventDefault();
+  };
+
   const handleTouchEnd = (e) => {
+    e.preventDefault();
     if (!touchStart) return;
 
     const touchEnd = {
@@ -165,23 +185,17 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
 
     const diffX = touchEnd.x - touchStart.x;
     const diffY = touchEnd.y - touchStart.y;
+    const minSwipeDistance = 30;
+
+    if (Math.abs(diffX) < minSwipeDistance && Math.abs(diffY) < minSwipeDistance) {
+      setTouchStart(null);
+      return;
+    }
 
     if (Math.abs(diffX) > Math.abs(diffY)) {
-      const newDirection = diffX > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 };
-      const opposite = directionRef.current.x === -newDirection.x;
-      if (!opposite) {
-        setDirection(newDirection);
-        directionRef.current = newDirection;
-        playSound(moveSoundRef);
-      }
+      changeDirection(diffX > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 });
     } else {
-      const newDirection = diffY > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 };
-      const opposite = directionRef.current.y === -newDirection.y;
-      if (!opposite) {
-        setDirection(newDirection);
-        directionRef.current = newDirection;
-        playSound(moveSoundRef);
-      }
+      changeDirection(diffY > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 });
     }
 
     setTouchStart(null);
@@ -238,7 +252,7 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
   }, [gameOver, isPaused, food, score, speed, onGameOver, generateFood, soundEnabled]);
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex flex-col items-center gap-4 py-4">
       <div className="flex justify-between items-center w-full max-w-md px-4">
         <div className="text-white">
           <span className="font-bold text-lg">{playerName}</span>
@@ -256,12 +270,13 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
       </div>
 
       <div 
-        className={`relative ${currentTheme.bg} border-4 ${currentTheme.grid} shadow-2xl`}
+        className={`relative ${currentTheme.bg} border-4 ${currentTheme.grid} shadow-2xl touch-none`}
         style={{ 
           width: GRID_SIZE * CELL_SIZE, 
           height: GRID_SIZE * CELL_SIZE 
         }}
         onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
         {snake.map((segment, index) => (
@@ -303,9 +318,70 @@ backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/stora
         )}
       </div>
 
-      <div className="text-white text-sm text-center">
-        <p>🎮 Flechas/WASD | ⏸️ ESPACIO | 🔊 M para sonido</p>
-        <p className="md:hidden">📱 Desliza para moverte</p>
+      {/* Controles táctiles para móvil */}
+      {isMobile && (
+        <div className="flex flex-col items-center gap-3 mt-4">
+          <button
+            onTouchStart={(e) => {
+              e.preventDefault();
+              changeDirection({ x: 0, y: -1 });
+            }}
+            className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
+          >
+            ⬆️
+          </button>
+          <div className="flex gap-3">
+            <button
+              onTouchStart={(e) => {
+                e.preventDefault();
+                changeDirection({ x: -1, y: 0 });
+              }}
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
+            >
+              ⬅️
+            </button>
+            <button
+              onTouchStart={(e) => {
+                e.preventDefault();
+                changeDirection({ x: 0, y: 1 });
+              }}
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
+            >
+              ⬇️
+            </button>
+            <button
+              onTouchStart={(e) => {
+                e.preventDefault();
+                changeDirection({ x: 1, y: 0 });
+              }}
+              className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
+            >
+              ➡️
+            </button>
+          </div>
+          <button
+            onTouchStart={(e) => {
+              e.preventDefault();
+              setIsPaused(prev => !prev);
+            }}
+            className="bg-yellow-500 hover:bg-yellow-600 active:bg-yellow-700 text-white font-bold px-6 py-3 rounded-lg shadow-lg active:scale-95 transition-all mt-2"
+          >
+            {isPaused ? '▶️ Reanudar' : '⏸️ Pausar'}
+          </button>
+        </div>
+      )}
+
+      <div className="text-white text-sm text-center px-4">
+        {!isMobile ? (
+          <>
+            <p>🎮 Flechas/WASD | ⏸️ ESPACIO | 🔊 M para sonido</p>
+          </>
+        ) : (
+          <>
+            <p>📱 Usa los botones o desliza en el tablero</p>
+            <p className="text-xs opacity-75 mt-1">Desliza arriba/abajo/izq/der para moverte</p>
+          </>
+        )}
       </div>
     </div>
   );
