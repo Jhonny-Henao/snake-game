@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import Footer from "@/components/Footer";
+
 
 const SKINS = {
   neon: { name: 'Neón', head: '#00ffff', body: '#0066ff', icon: '⚡' },

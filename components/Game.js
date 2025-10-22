@@ -26,25 +26,61 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [baseSpeed] = useState(100); // Velocidad base constante
+  const [baseSpeed] = useState(100);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [combo, setCombo] = useState(0);
   const [powerUps, setPowerUps] = useState([]);
   const [activeEffects, setActiveEffects] = useState([]);
   const [skin, setSkin] = useState(selectedSkin);
-  const [growthQueue, setGrowthQueue] = useState(0); // Cola de crecimiento
+  const [growthQueue, setGrowthQueue] = useState(0);
   
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
   const directionRef = useRef(direction);
   const nextDirectionRef = useRef(direction);
   const mouseMode = useRef(false);
-  const mousePos = useRef({ x: 0, y: 0 });
-  const touchPos = useRef(null);
+  const touchStartPos = useRef(null);
+  const lastTouchPos = useRef(null);
   const eatSoundRef = useRef(null);
   const gameOverSoundRef = useRef(null);
   const comboSoundRef = useRef(null);
   const powerUpSoundRef = useRef(null);
   const backgroundMusicRef = useRef(null);
+
+  // Prevenir comportamiento por defecto del navegador móvil
+  useEffect(() => {
+    const preventDefaultTouch = (e) => {
+      if (e.target.closest('canvas') || e.target.closest('button')) {
+        e.preventDefault();
+      }
+    };
+
+    const preventScroll = (e) => {
+      e.preventDefault();
+    };
+
+    document.addEventListener('touchmove', preventDefaultTouch, { passive: false });
+    document.addEventListener('touchstart', preventDefaultTouch, { passive: false });
+    document.addEventListener('gesturestart', preventScroll, { passive: false });
+    document.addEventListener('gesturechange', preventScroll, { passive: false });
+    document.addEventListener('gestureend', preventScroll, { passive: false });
+
+    // Ocultar barra de direcciones en móviles
+    const hideAddressBar = () => {
+      window.scrollTo(0, 1);
+    };
+    window.addEventListener('load', hideAddressBar);
+    setTimeout(hideAddressBar, 100);
+
+    return () => {
+      document.removeEventListener('touchmove', preventDefaultTouch);
+      document.removeEventListener('touchstart', preventDefaultTouch);
+      document.removeEventListener('gesturestart', preventScroll);
+      document.removeEventListener('gesturechange', preventScroll);
+      document.removeEventListener('gestureend', preventScroll);
+      window.removeEventListener('load', hideAddressBar);
+    };
+  }, []);
 
   // Inicializar sonidos
   useEffect(() => {
@@ -89,7 +125,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     }
   };
 
-  // Generar comida
   const generateFood = useCallback(() => {
     const newFoodItems = [];
     const count = 5;
@@ -104,7 +139,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           id: Date.now() + i + Math.random()
         };
         attempts++;
-        // Verificar que no esté en la serpiente ni en comida existente
       } while (
         attempts < 100 && 
         (snake.some(segment => segment.x === newFood.x && segment.y === newFood.y) ||
@@ -117,12 +151,10 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     return newFoodItems;
   }, [snake]);
 
-  // Inicializar comida
   useEffect(() => {
     setFood(generateFood());
   }, []);
 
-  // Crear partículas
   const createParticles = (x, y, color, count = 10) => {
     const newParticles = [];
     for (let i = 0; i < count; i++) {
@@ -139,7 +171,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     setParticles(prev => [...prev, ...newParticles]);
   };
 
-  // Actualizar partículas
   useEffect(() => {
     const interval = setInterval(() => {
       setParticles(prev => prev
@@ -156,7 +187,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     return () => clearInterval(interval);
   }, []);
 
-  // Activar efecto
   const activateEffect = (type, duration = 5000) => {
     const effect = { type, endTime: Date.now() + duration };
     setActiveEffects(prev => [...prev.filter(e => e.type !== type), effect]);
@@ -170,7 +200,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     return activeEffects.some(e => e.type === type && e.endTime > Date.now());
   };
 
-  // Controles de teclado MEJORADOS
+  // Controles de teclado
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (gameOver) return;
@@ -187,7 +217,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
         return;
       }
 
-      // Cambio de skin con números
       const skinKeys = { '1': 'neon', '2': 'fire', '3': 'toxic', '4': 'galaxy', '5': 'gold' };
       if (skinKeys[e.key]) {
         setSkin(skinKeys[e.key]);
@@ -228,46 +257,49 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameOver, isPaused]);
 
-  // Modo mouse/touch
-  const handleMouseMove = useCallback((e) => {
+  // Controles táctiles mejorados estilo Slither.io
+  const handleTouchStart = useCallback((e) => {
     if (gameOver || isPaused) return;
+    e.preventDefault();
+    
+    const touch = e.touches[0];
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
-    mousePos.current = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+    touchStartPos.current = {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top
     };
+    lastTouchPos.current = touchStartPos.current;
     mouseMode.current = true;
   }, [gameOver, isPaused]);
 
   const handleTouchMove = useCallback((e) => {
-    if (gameOver || isPaused) return;
+    if (gameOver || isPaused || !touchStartPos.current) return;
     e.preventDefault();
+    
+    const touch = e.touches[0];
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
-    const touch = e.touches[0];
-    touchPos.current = {
+    lastTouchPos.current = {
       x: touch.clientX - rect.left,
       y: touch.clientY - rect.top
     };
     mouseMode.current = true;
   }, [gameOver, isPaused]);
 
-  const handleTouchEnd = useCallback(() => {
-    touchPos.current = null;
+  const handleTouchEnd = useCallback((e) => {
+    e.preventDefault();
+    // No resetear la posición, mantener la última dirección
   }, []);
 
-  // Calcular dirección del mouse
+  // Calcular dirección del touch (modo continuo como Slither.io)
   useEffect(() => {
     const updateDirection = () => {
-      if (gameOver || isPaused || !mouseMode.current) return;
-      
-      const pos = touchPos.current || mousePos.current;
-      if (!pos) return;
+      if (gameOver || isPaused || !mouseMode.current || !lastTouchPos.current) return;
       
       const head = snake[0];
       if (!head) return;
@@ -275,11 +307,11 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
       const headPixelX = head.x * CELL_SIZE + CELL_SIZE / 2;
       const headPixelY = head.y * CELL_SIZE + CELL_SIZE / 2;
       
-      const dx = pos.x - headPixelX;
-      const dy = pos.y - headPixelY;
+      const dx = lastTouchPos.current.x - headPixelX;
+      const dy = lastTouchPos.current.y - headPixelY;
       const distance = Math.sqrt(dx * dx + dy * dy);
       
-      if (distance > 20) {
+      if (distance > 5) { // Threshold más bajo para móviles
         const angle = Math.atan2(dy, dx);
         const deg = angle * 180 / Math.PI;
         
@@ -307,7 +339,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     if (gameOver || isPaused) return;
 
     const gameLoop = setInterval(() => {
-      // Aplicar la siguiente dirección
       directionRef.current = nextDirectionRef.current;
 
       setSnake(prevSnake => {
@@ -317,18 +348,16 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           y: head.y + directionRef.current.y
         };
 
-        // Colisión con paredes
         if (!isEffectActive('invincible')) {
           if (newHead.x < 0 || newHead.x >= GRID_SIZE || newHead.y < 0 || newHead.y >= GRID_SIZE) {
             setGameOver(true);
             playSound(gameOverSoundRef);
             backgroundMusicRef.current?.pause();
-            createParticles(head.x, head.y, '#ff0000', 30); // Explosión roja
+            createParticles(head.x, head.y, '#ff0000', 30);
             setTimeout(() => onGameOver(score), 800);
             return prevSnake;
           }
 
-          // Colisión consigo mismo (debe tener al menos 4 segmentos para chocar)
           if (prevSnake.length >= 4) {
             const collision = prevSnake.slice(1).some(segment => 
               segment.x === newHead.x && segment.y === newHead.y
@@ -338,7 +367,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
               setGameOver(true);
               playSound(gameOverSoundRef);
               backgroundMusicRef.current?.pause();
-              createParticles(newHead.x, newHead.y, '#ff0000', 30); // Explosión roja
+              createParticles(newHead.x, newHead.y, '#ff0000', 30);
               setTimeout(() => onGameOver(score), 800);
               return prevSnake;
             }
@@ -347,14 +376,12 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
 
         const newSnake = [newHead, ...prevSnake];
 
-        // Verificar comida
         let foodEaten = false;
         
         setFood(prevFood => {
           const remainingFood = prevFood.filter(f => {
             if (f.x === newHead.x && f.y === newHead.y) {
               foodEaten = true;
-              // Agregar a la cola de crecimiento
               setGrowthQueue(prev => prev + 1);
               
               const points = f.type === 'special' ? 25 : 10;
@@ -381,11 +408,9 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           return remainingFood;
         });
 
-        // Verificar power-ups
         setPowerUps(prevPowerUps => {
           return prevPowerUps.filter(p => {
             if (p.x === newHead.x && p.y === newHead.y) {
-              // Power-up también hace crecer
               setGrowthQueue(prev => prev + 1);
               
               playSound(powerUpSoundRef);
@@ -395,12 +420,10 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
               if (p.type === 'invincible') {
                 activateEffect('invincible', 5000);
               } else if (p.type === 'speed') {
-                // No modificar velocidad, solo dar puntos
                 setScore(prev => prev + 30);
               } else if (p.type === 'doublePoints') {
                 activateEffect('doublePoints', 8000);
               } else if (p.type === 'freeze') {
-                // No modificar velocidad, solo dar puntos
                 setScore(prev => prev + 30);
               }
               
@@ -410,13 +433,9 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           });
         });
 
-        // Aplicar crecimiento desde la cola
         if (growthQueue > 0) {
-          // Si hay crecimiento pendiente, NO remover la cola
           setGrowthQueue(prev => prev - 1);
-          // No hacer pop(), la serpiente crece
         } else {
-          // No hay crecimiento pendiente, remover cola (movimiento normal)
           newSnake.pop();
         }
         
@@ -424,7 +443,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           setCombo(0);
         }
 
-        // Generar power-ups
         if (Math.random() > 0.985 && powerUps.length < 2) {
           const types = ['invincible', 'speed', 'doublePoints', 'freeze'];
           const newPowerUp = {
@@ -452,14 +470,12 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     const width = GRID_SIZE * CELL_SIZE;
     const height = GRID_SIZE * CELL_SIZE;
 
-    // Fondo con gradiente
     const bgGradient = ctx.createLinearGradient(0, 0, width, height);
     bgGradient.addColorStop(0, '#0a0a1a');
     bgGradient.addColorStop(1, '#1a0a2a');
     ctx.fillStyle = bgGradient;
     ctx.fillRect(0, 0, width, height);
 
-    // Grid
     ctx.strokeStyle = 'rgba(100, 100, 255, 0.05)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= GRID_SIZE; i++) {
@@ -473,7 +489,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
       ctx.stroke();
     }
 
-    // Comida
     food.forEach(f => {
       const pulse = Math.sin(Date.now() / 200) * 2;
       const gradient = ctx.createRadialGradient(
@@ -508,19 +523,12 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
       ctx.shadowBlur = 0;
     });
 
-    // Power-ups
     powerUps.forEach(p => {
       const colors = {
         invincible: '#ff00ff',
         speed: '#00ffff',
         doublePoints: '#ffff00',
         freeze: '#00aaff'
-      };
-      const icons = {
-        invincible: '⚡',
-        speed: '🚀',
-        doublePoints: '💎',
-        freeze: '❄️'
       };
       
       const pulse = Math.sin(Date.now() / 150) * 3;
@@ -539,7 +547,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
       ctx.shadowBlur = 0;
     });
 
-    // Serpiente con skin
     const currentSkin = SKINS[skin];
     snake.forEach((segment, index) => {
       const alpha = 1 - (index / snake.length) * 0.4;
@@ -580,7 +587,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
         ctx.fill();
         ctx.shadowBlur = 0;
         
-        // Ojos
         ctx.fillStyle = '#ffffff';
         ctx.shadowBlur = 5;
         ctx.shadowColor = '#ffffff';
@@ -601,7 +607,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
       }
     });
 
-    // Partículas
     particles.forEach(p => {
       ctx.fillStyle = `${p.color}${Math.floor(p.life * 255).toString(16).padStart(2, '0')}`;
       ctx.shadowBlur = 10;
@@ -624,7 +629,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
   };
 
   return (
-    <div className="fixed inset-0 bg-gradient-to-br from-indigo-950 via-purple-950 to-black flex flex-col items-center justify-center overflow-hidden">
+    <div ref={containerRef} className="fixed inset-0 bg-gradient-to-br from-indigo-950 via-purple-950 to-black flex flex-col items-center justify-center overflow-hidden touch-none">
       {/* HUD */}
       <div className="absolute top-0 left-0 right-0 z-20 p-2 sm:p-4 flex justify-between items-start flex-wrap gap-2">
         <div className="bg-black/40 backdrop-blur-md rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-cyan-500/30">
@@ -705,22 +710,32 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
         ref={canvasRef}
         width={GRID_SIZE * CELL_SIZE}
         height={GRID_SIZE * CELL_SIZE}
-        className="border-4 border-cyan-500/30 rounded-lg shadow-2xl cursor-crosshair"
+        className="border-4 border-cyan-500/30 rounded-lg shadow-2xl touch-none"
         style={{
           boxShadow: '0 0 60px rgba(0, 255, 255, 0.3), inset 0 0 60px rgba(0, 0, 0, 0.5)',
           maxWidth: '95vw',
-          maxHeight: '70vh'
+          maxHeight: '70vh',
+          cursor: 'none'
         }}
-        onMouseMove={handleMouseMove}
+        onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       />
 
-      {/* Instrucciones */}
-      <div className="absolute bottom-2 sm:bottom-4 left-0 right-0 text-center px-2 z-20">
+      {/* Instrucciones - Ocultas en móvil cuando se juega */}
+      <div className="absolute bottom-2 sm:bottom-4 left-0 right-0 text-center px-2 z-20 hidden sm:block">
         <div className="bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl px-3 sm:px-6 py-2 sm:py-3 border border-white/20 inline-block">
           <p className="text-cyan-400 text-xs sm:text-sm font-semibold">
-            🎮 WASD/Arrows or Move Mouse/Touch • 🍎 +10 • ⭐ +25 • 💎 Power-ups • 1-5: Change Skin
+            🎮 WASD/Arrows or Touch Screen • 🍎 +10 • ⭐ +25 • 💎 Power-ups • 1-5: Change Skin
+          </p>
+        </div>
+      </div>
+
+      {/* Indicador táctil para móviles */}
+      <div className="absolute bottom-2 left-0 right-0 text-center px-2 z-20 sm:hidden">
+        <div className="bg-black/60 backdrop-blur-md rounded-lg px-4 py-2 border border-cyan-400/40 inline-block">
+          <p className="text-cyan-300 text-xs font-bold">
+            👆 Touch & Drag para mover la serpiente
           </p>
         </div>
       </div>
