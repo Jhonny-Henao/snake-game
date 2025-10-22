@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-const GRID_SIZE = 30; // Reducido para móvil
-const CELL_SIZE = 18; // Aumentado para mejor visibilidad
+const GRID_SIZE = 40;
+const CELL_SIZE = 15;
 const INITIAL_SNAKE = [
-  { x: 15, y: 15 },
-  { x: 14, y: 15 },
-  { x: 13, y: 15 }
+  { x: 20, y: 20 },
+  { x: 19, y: 20 },
+  { x: 18, y: 20 }
 ];
 
 const SKINS = {
@@ -26,7 +26,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [baseSpeed] = useState(120); // Más lento para móvil
+  const [baseSpeed] = useState(100);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [combo, setCombo] = useState(0);
   const [powerUps, setPowerUps] = useState([]);
@@ -55,7 +55,9 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
   // Prevenir comportamiento por defecto del navegador móvil
   useEffect(() => {
     const preventDefaultTouch = (e) => {
-      e.preventDefault();
+      if (e.target.closest('canvas')) {
+        e.preventDefault();
+      }
     };
 
     document.body.style.overflow = 'hidden';
@@ -65,10 +67,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     
     document.addEventListener('touchmove', preventDefaultTouch, { passive: false });
     document.addEventListener('gesturestart', preventDefaultTouch, { passive: false });
-    document.addEventListener('gesturechange', preventDefaultTouch, { passive: false });
-    document.addEventListener('gestureend', preventDefaultTouch, { passive: false });
 
-    // Ocultar barra de direcciones
     setTimeout(() => window.scrollTo(0, 1), 100);
 
     return () => {
@@ -78,8 +77,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
       document.body.style.height = '';
       document.removeEventListener('touchmove', preventDefaultTouch);
       document.removeEventListener('gesturestart', preventDefaultTouch);
-      document.removeEventListener('gesturechange', preventDefaultTouch);
-      document.removeEventListener('gestureend', preventDefaultTouch);
     };
   }, []);
 
@@ -128,7 +125,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
 
   const generateFood = useCallback(() => {
     const newFoodItems = [];
-    const count = 4;
+    const count = 5;
     for (let i = 0; i < count; i++) {
       let newFood;
       let attempts = 0;
@@ -136,7 +133,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
         newFood = {
           x: Math.floor(Math.random() * GRID_SIZE),
           y: Math.floor(Math.random() * GRID_SIZE),
-          type: Math.random() > 0.75 ? 'special' : 'normal',
+          type: Math.random() > 0.7 ? 'special' : 'normal',
           id: Date.now() + i + Math.random()
         };
         attempts++;
@@ -257,7 +254,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameOver, isPaused]);
 
-  // Controles táctiles MEJORADOS - Más suaves y controlables
+  // Controles táctiles MEJORADOS - Swipe simple
   const handleTouchStart = useCallback((e) => {
     if (gameOver || isPaused) return;
     e.preventDefault();
@@ -270,13 +267,15 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     const rect = canvas.getBoundingClientRect();
     currentTouchPos.current = {
       x: touch.clientX - rect.left,
-      y: touch.clientY - rect.top
+      y: touch.clientY - rect.top,
+      startX: touch.clientX - rect.left,
+      startY: touch.clientY - rect.top
     };
     touchActive.current = true;
   }, [gameOver, isPaused]);
 
   const handleTouchMove = useCallback((e) => {
-    if (gameOver || isPaused || !touchActive.current) return;
+    if (gameOver || isPaused || !touchActive.current || !currentTouchPos.current) return;
     e.preventDefault();
     e.stopPropagation();
     
@@ -285,10 +284,37 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
-    currentTouchPos.current = {
-      x: touch.clientX - rect.left,
-      y: touch.clientY - rect.top
-    };
+    const newX = touch.clientX - rect.left;
+    const newY = touch.clientY - rect.top;
+    
+    const dx = newX - currentTouchPos.current.startX;
+    const dy = newY - currentTouchPos.current.startY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Swipe detectado con threshold de 40px
+    if (distance > 40) {
+      const angle = Math.atan2(dy, dx);
+      const deg = angle * 180 / Math.PI;
+      
+      let newDir;
+      if (deg >= -45 && deg < 45) newDir = { x: 1, y: 0 }; // Derecha
+      else if (deg >= 45 && deg < 135) newDir = { x: 0, y: 1 }; // Abajo
+      else if (deg >= 135 || deg < -135) newDir = { x: -1, y: 0 }; // Izquierda
+      else newDir = { x: 0, y: -1 }; // Arriba
+      
+      const currentDir = directionRef.current;
+      const isOpposite = (currentDir.x === -newDir.x && currentDir.y === -newDir.y);
+      
+      if (!isOpposite) {
+        nextDirectionRef.current = newDir;
+        // Resetear punto de inicio después de cambiar dirección
+        currentTouchPos.current.startX = newX;
+        currentTouchPos.current.startY = newY;
+      }
+    }
+    
+    currentTouchPos.current.x = newX;
+    currentTouchPos.current.y = newY;
   }, [gameOver, isPaused]);
 
   const handleTouchEnd = useCallback((e) => {
@@ -297,48 +323,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     touchActive.current = false;
     currentTouchPos.current = null;
   }, []);
-
-  // Calcular dirección suavizada para touch
-  useEffect(() => {
-    if (!isTouchDevice.current) return;
-    
-    const updateDirection = () => {
-      if (gameOver || isPaused || !touchActive.current || !currentTouchPos.current) return;
-      
-      const head = snake[0];
-      if (!head) return;
-      
-      const headPixelX = head.x * CELL_SIZE + CELL_SIZE / 2;
-      const headPixelY = head.y * CELL_SIZE + CELL_SIZE / 2;
-      
-      const dx = currentTouchPos.current.x - headPixelX;
-      const dy = currentTouchPos.current.y - headPixelY;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      // Zona muerta más grande para evitar cambios involuntarios
-      if (distance > 30) {
-        const angle = Math.atan2(dy, dx);
-        const deg = angle * 180 / Math.PI;
-        
-        let newDir;
-        // Zonas más amplias para cada dirección (45 grados cada una)
-        if (deg >= -22.5 && deg < 67.5) newDir = { x: 1, y: 0 }; // Derecha
-        else if (deg >= 67.5 && deg < 112.5) newDir = { x: 0, y: 1 }; // Abajo
-        else if (deg >= 112.5 || deg < -157.5) newDir = { x: -1, y: 0 }; // Izquierda
-        else newDir = { x: 0, y: -1 }; // Arriba
-        
-        const currentDir = directionRef.current;
-        const isOpposite = (currentDir.x === -newDir.x && currentDir.y === -newDir.y);
-        
-        if (!isOpposite && (newDir.x !== currentDir.x || newDir.y !== currentDir.y)) {
-          nextDirectionRef.current = newDir;
-        }
-      }
-    };
-    
-    const interval = setInterval(updateDirection, 100); // Actualización más lenta = más suave
-    return () => clearInterval(interval);
-  }, [snake, gameOver, isPaused]);
 
   // Loop principal del juego
   useEffect(() => {
@@ -408,7 +392,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
             return true;
           });
 
-          if (foodEaten && remainingFood.length < 2) {
+          if (foodEaten && remainingFood.length < 3) {
             return [...remainingFood, ...generateFood()];
           }
           return remainingFood;
@@ -425,8 +409,12 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
               
               if (p.type === 'invincible') {
                 activateEffect('invincible', 5000);
+              } else if (p.type === 'speed') {
+                setScore(prev => prev + 30);
               } else if (p.type === 'doublePoints') {
                 activateEffect('doublePoints', 8000);
+              } else if (p.type === 'freeze') {
+                setScore(prev => prev + 30);
               }
               
               return false;
@@ -445,8 +433,8 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           setCombo(0);
         }
 
-        if (Math.random() > 0.99 && powerUps.length < 1) {
-          const types = ['invincible', 'doublePoints'];
+        if (Math.random() > 0.985 && powerUps.length < 2) {
+          const types = ['invincible', 'speed', 'doublePoints', 'freeze'];
           const newPowerUp = {
             x: Math.floor(Math.random() * GRID_SIZE),
             y: Math.floor(Math.random() * GRID_SIZE),
@@ -528,7 +516,9 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
     powerUps.forEach(p => {
       const colors = {
         invincible: '#ff00ff',
-        doublePoints: '#ffff00'
+        speed: '#00ffff',
+        doublePoints: '#ffff00',
+        freeze: '#00aaff'
       };
       
       const pulse = Math.sin(Date.now() / 150) * 3;
@@ -590,9 +580,9 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
         ctx.fillStyle = '#ffffff';
         ctx.shadowBlur = 5;
         ctx.shadowColor = '#ffffff';
-        const eyeSize = 4;
-        ctx.fillRect(segment.x * CELL_SIZE + 5, segment.y * CELL_SIZE + 5, eyeSize, eyeSize);
-        ctx.fillRect(segment.x * CELL_SIZE + CELL_SIZE - 9, segment.y * CELL_SIZE + 5, eyeSize, eyeSize);
+        const eyeSize = 3;
+        ctx.fillRect(segment.x * CELL_SIZE + 4, segment.y * CELL_SIZE + 4, eyeSize, eyeSize);
+        ctx.fillRect(segment.x * CELL_SIZE + CELL_SIZE - 7, segment.y * CELL_SIZE + 4, eyeSize, eyeSize);
         ctx.shadowBlur = 0;
       } else {
         ctx.beginPath();
@@ -641,24 +631,34 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
   };
 
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-gradient-to-br from-indigo-950 via-purple-950 to-black flex flex-col items-center justify-center overflow-hidden select-none">
-      {/* HUD Compacto */}
-      <div className="absolute top-0 left-0 right-0 z-20 p-2 flex justify-between items-center gap-2">
-        <div className="bg-black/60 backdrop-blur-md rounded-lg px-3 py-1.5 border border-purple-500/30 flex items-center gap-2">
-          <span className="text-purple-400 text-xs font-bold">{playerName}</span>
-          <span className="text-white text-lg font-bold">{score}</span>
+    <div ref={containerRef} className="fixed inset-0 bg-gradient-to-br from-indigo-950 via-purple-950 to-black flex flex-col items-center justify-center overflow-hidden">
+      {/* HUD */}
+      <div className="absolute top-0 left-0 right-0 z-20 p-2 sm:p-4 flex justify-between items-start flex-wrap gap-2">
+        <div className="bg-black/40 backdrop-blur-md rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-cyan-500/30">
+          <div className="text-cyan-400 text-xs sm:text-sm font-semibold mb-1">PLAYER</div>
+          <div className="text-white text-sm sm:text-xl font-bold">{playerName}</div>
+        </div>
+        
+        <div className="bg-black/40 backdrop-blur-md rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-purple-500/30">
+          <div className="text-purple-400 text-xs sm:text-sm font-semibold mb-1">SCORE</div>
+          <div className="text-white text-xl sm:text-3xl font-bold">{score}</div>
           {combo > 1 && (
-            <span className="text-yellow-400 text-xs font-bold animate-pulse">
-              🔥x{combo}
-            </span>
+            <div className="text-yellow-400 text-xs sm:text-sm font-bold animate-pulse mt-1">
+              🔥 COMBO x{combo}
+            </div>
           )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="bg-black/40 backdrop-blur-md rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-green-500/30">
+          <div className="text-green-400 text-xs sm:text-sm font-semibold mb-1">LENGTH</div>
+          <div className="text-white text-xl sm:text-3xl font-bold">{snake.length}</div>
+        </div>
+
+        <div className="flex gap-2 sm:gap-3">
           <button
             onTouchEnd={handleSoundToggle}
             onClick={handleSoundToggle}
-            className="bg-black/60 backdrop-blur-md rounded-lg p-2.5 border border-white/20 active:scale-95 transition-transform text-xl touch-manipulation"
+            className="bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl p-2 sm:p-3 border border-white/20 hover:border-white/40 transition-all text-xl sm:text-2xl active:scale-95 touch-manipulation"
             style={{ WebkitTapHighlightColor: 'transparent' }}
           >
             {soundEnabled ? '🔊' : '🔇'}
@@ -666,7 +666,7 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           <button
             onTouchEnd={handlePauseToggle}
             onClick={handlePauseToggle}
-            className="bg-black/60 backdrop-blur-md rounded-lg p-2.5 border border-white/20 active:scale-95 transition-transform text-xl touch-manipulation"
+            className="bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl p-2 sm:p-3 border border-white/20 hover:border-white/40 transition-all text-xl sm:text-2xl active:scale-95 touch-manipulation"
             style={{ WebkitTapHighlightColor: 'transparent' }}
           >
             {isPaused ? '▶️' : '⏸️'}
@@ -675,78 +675,90 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
       </div>
 
       {/* Status effects */}
-      {(isEffectActive('invincible') || isEffectActive('doublePoints')) && (
-        <div className="absolute top-14 right-2 flex flex-col gap-1 z-20">
-          {isEffectActive('invincible') && (
-            <div className="bg-purple-500/40 backdrop-blur-md rounded-lg px-2 py-1 border border-purple-400/60 animate-pulse">
-              <span className="text-purple-200 text-xs font-bold">⚡ INVINCIBLE</span>
-            </div>
-          )}
-          {isEffectActive('doublePoints') && (
-            <div className="bg-yellow-500/40 backdrop-blur-md rounded-lg px-2 py-1 border border-yellow-400/60 animate-pulse">
-              <span className="text-yellow-200 text-xs font-bold">💎 2X</span>
-            </div>
-          )}
-        </div>
-      )}
+      <div className="absolute top-20 sm:top-24 right-2 sm:right-4 flex flex-col gap-2 z-20">
+        {isEffectActive('invincible') && (
+          <div className="bg-purple-500/30 backdrop-blur-md rounded-lg sm:rounded-xl px-2 sm:px-4 py-1 sm:py-2 border border-purple-400/50 animate-pulse">
+            <span className="text-purple-300 text-xs sm:text-sm font-bold">⚡ INVINCIBLE</span>
+          </div>
+        )}
+        {isEffectActive('doublePoints') && (
+          <div className="bg-yellow-500/30 backdrop-blur-md rounded-lg sm:rounded-xl px-2 sm:px-4 py-1 sm:py-2 border border-yellow-400/50 animate-pulse">
+            <span className="text-yellow-300 text-xs sm:text-sm font-bold">💎 2X POINTS</span>
+          </div>
+        )}
+        {isEffectActive('freeze') && (
+          <div className="bg-blue-500/30 backdrop-blur-md rounded-lg sm:rounded-xl px-2 sm:px-4 py-1 sm:py-2 border border-blue-400/50 animate-pulse">
+            <span className="text-blue-300 text-xs sm:text-sm font-bold">❄️ SLOW</span>
+          </div>
+        )}
+      </div>
 
-      {/* Canvas con mejor tamaño para móvil */}
+      {/* Skin selector */}
+      <div className="absolute top-20 sm:top-24 left-2 sm:left-4 bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl p-2 sm:p-3 border border-white/20 z-20">
+        <div className="text-white text-xs font-semibold mb-2 hidden sm:block">SKIN (1-5)</div>
+        <div className="flex gap-1 sm:gap-2">
+          {Object.keys(SKINS).map((s, i) => (
+            <button
+              key={s}
+              onClick={() => setSkin(s)}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setSkin(s);
+              }}
+              className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 transition-all touch-manipulation ${
+                skin === s ? 'border-white scale-110' : 'border-white/30'
+              }`}
+              style={{ 
+                background: `linear-gradient(135deg, ${SKINS[s].head}, ${SKINS[s].body})`,
+                WebkitTapHighlightColor: 'transparent'
+              }}
+              title={s}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Canvas */}
       <canvas
         ref={canvasRef}
         width={GRID_SIZE * CELL_SIZE}
         height={GRID_SIZE * CELL_SIZE}
-        className="border-4 border-cyan-500/40 rounded-lg shadow-2xl touch-none"
+        className="border-4 border-cyan-500/30 rounded-lg shadow-2xl cursor-crosshair touch-none"
         style={{
-          boxShadow: '0 0 40px rgba(0, 255, 255, 0.3)',
-          maxWidth: '96vw',
-          maxHeight: '85vh',
-          width: '540px',
-          height: '540px',
-          cursor: isTouchDevice.current ? 'default' : 'crosshair'
+          boxShadow: '0 0 60px rgba(0, 255, 255, 0.3), inset 0 0 60px rgba(0, 0, 0, 0.5)',
+          maxWidth: '95vw',
+          maxHeight: '70vh'
         }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       />
 
-      {/* Indicador visual de toque activo */}
-      {touchActive.current && currentTouchPos.current && (
-        <div 
-          className="absolute w-12 h-12 rounded-full border-4 border-cyan-400 pointer-events-none z-30 animate-ping"
-          style={{
-            left: currentTouchPos.current.x,
-            top: currentTouchPos.current.y,
-            transform: 'translate(-50%, -50%)'
-          }}
-        />
-      )}
-
-      {/* Instrucciones móvil */}
-      <div className="absolute bottom-2 left-0 right-0 text-center px-2 z-20">
-        <div className="bg-black/60 backdrop-blur-md rounded-lg px-4 py-2 border border-cyan-400/40 inline-block">
-          <p className="text-cyan-300 text-xs font-bold">
-            {isTouchDevice.current ? '👆 Toca y mantén presionado para dirigir la serpiente' : '🎮 WASD/Arrows • 🍎 +10 • ⭐ +25'}
+      {/* Instrucciones */}
+      <div className="absolute bottom-2 sm:bottom-4 left-0 right-0 text-center px-2 z-20">
+        <div className="bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl px-3 sm:px-6 py-2 sm:py-3 border border-white/20 inline-block">
+          <p className="text-cyan-400 text-xs sm:text-sm font-semibold">
+            {isTouchDevice.current 
+              ? '👆 Desliza en cualquier dirección para mover • 🍎 +10 • ⭐ +25' 
+              : '🎮 WASD/Arrows • 🍎 +10 • ⭐ +25 • 💎 Power-ups • 1-5: Change Skin'
+            }
           </p>
         </div>
       </div>
 
-      {/* Longitud de serpiente */}
-      <div className="absolute bottom-16 left-2 bg-black/60 backdrop-blur-md rounded-lg px-3 py-1.5 border border-green-500/30 z-20">
-        <span className="text-green-400 text-xs font-bold">🐍 {snake.length}</span>
-      </div>
-
       {/* Game Over */}
       {gameOver && (
-        <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex items-center justify-center z-40 animate-fadeIn">
-          <div className="bg-gradient-to-br from-purple-900/95 to-pink-900/95 backdrop-blur-md rounded-2xl p-8 border-4 border-cyan-500/60 text-center transform animate-scaleIn max-w-sm mx-4">
-            <div className="text-6xl mb-4 animate-bounce">💀</div>
-            <h2 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-3">
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-30 animate-fadeIn">
+          <div className="bg-gradient-to-br from-purple-900/90 to-pink-900/90 backdrop-blur-md rounded-2xl sm:rounded-3xl p-6 sm:p-12 border-4 border-cyan-500/50 text-center transform animate-scaleIn max-w-md mx-4">
+            <div className="text-5xl sm:text-8xl mb-4 animate-bounce">💀</div>
+            <h2 className="text-4xl sm:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-4">
               GAME OVER
             </h2>
-            <div className="text-white text-lg font-bold mb-1">Final Score</div>
-            <div className="text-yellow-400 text-5xl font-bold mb-4">{score}</div>
-            <div className="text-gray-300 text-base">
-              Longitud: {snake.length}
+            <div className="text-white text-xl sm:text-3xl font-bold mb-2">Final Score</div>
+            <div className="text-yellow-400 text-4xl sm:text-6xl font-bold mb-6">{score}</div>
+            <div className="text-gray-300 text-lg sm:text-xl">
+              Snake Length: {snake.length}
             </div>
           </div>
         </div>
@@ -754,10 +766,10 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
 
       {/* Pause */}
       {isPaused && !gameOver && (
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-40">
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-10 border-2 border-white/30">
-            <div className="text-white text-6xl font-bold animate-pulse">⏸️</div>
-            <p className="text-white/80 text-sm mt-4 text-center">PAUSADO</p>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-30">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl sm:rounded-3xl p-8 sm:p-12 border-2 border-white/30">
+            <div className="text-white text-5xl sm:text-7xl font-bold animate-pulse">⏸️ PAUSED</div>
+            <p className="text-white/70 text-sm sm:text-base mt-4 text-center">Press SPACE or ESC to continue</p>
           </div>
         </div>
       )}
@@ -778,7 +790,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic', select
           animation: scaleIn 0.4s ease-out;
         }
         
-        /* Prevenir selección y comportamientos no deseados */
         * {
           -webkit-tap-highlight-color: transparent;
           -webkit-touch-callout: none;
