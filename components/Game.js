@@ -2,75 +2,63 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
-const GRID_SIZE = 20;
-const CELL_SIZE = 19;
-const INITIAL_SNAKE = [{ x: 10, y: 10 }];
-const INITIAL_DIRECTION = { x: 1, y: 0 };
+const GRID_SIZE = 40;
+const CELL_SIZE = 15;
+const INITIAL_SNAKE = [
+  { x: 20, y: 20 },
+  { x: 19, y: 20 },
+  { x: 18, y: 20 }
+];
 
-const THEMES = {
-  classic: {
-    bg: 'bg-green-100',
-    snake: 'bg-green-600',
-    food: 'bg-red-500',
-    grid: 'border-green-300'
-  },
-  neon: {
-    bg: 'bg-purple-900',
-    snake: 'bg-cyan-400',
-    food: 'bg-pink-500',
-    grid: 'border-purple-700'
-  },
-  dark: {
-    bg: 'bg-gray-900',
-    snake: 'bg-yellow-400',
-    food: 'bg-orange-500',
-    grid: 'border-gray-700'
-  }
+const SKINS = {
+  neon: { head: '#00ffff', body: '#0066ff', glow: '#00ffff' },
+  fire: { head: '#ff4400', body: '#ff8800', glow: '#ff0000' },
+  toxic: { head: '#00ff00', body: '#44ff00', glow: '#00ff00' },
+  galaxy: { head: '#ff00ff', body: '#8800ff', glow: '#ff00ff' },
+  gold: { head: '#ffd700', body: '#ffaa00', glow: '#ffd700' }
 };
 
-export default function Game({ playerName, onGameOver, theme = 'classic' }) {
+export default function Game({ playerName, onGameOver, theme = 'classic', selectedSkin = 'neon' }) {
   const [snake, setSnake] = useState(INITIAL_SNAKE);
-  const [food, setFood] = useState({ x: 15, y: 15 });
-  const [direction, setDirection] = useState(INITIAL_DIRECTION);
+  const [food, setFood] = useState([]);
+  const [particles, setParticles] = useState([]);
+  const [direction, setDirection] = useState({ x: 1, y: 0 });
   const [gameOver, setGameOver] = useState(false);
   const [score, setScore] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [speed, setSpeed] = useState(150);
+  const [baseSpeed] = useState(100); // Velocidad base constante
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [isMobile, setIsMobile] = useState(false);
+  const [combo, setCombo] = useState(0);
+  const [powerUps, setPowerUps] = useState([]);
+  const [activeEffects, setActiveEffects] = useState([]);
+  const [skin, setSkin] = useState(selectedSkin);
+  const [growthQueue, setGrowthQueue] = useState(0); // Cola de crecimiento
   
+  const canvasRef = useRef(null);
   const directionRef = useRef(direction);
-  const currentTheme = THEMES[theme];
-  
-  // Refs para los sonidos
+  const nextDirectionRef = useRef(direction);
+  const mouseMode = useRef(false);
+  const mousePos = useRef({ x: 0, y: 0 });
+  const touchPos = useRef(null);
   const eatSoundRef = useRef(null);
   const gameOverSoundRef = useRef(null);
-  const moveSoundRef = useRef(null);
+  const comboSoundRef = useRef(null);
+  const powerUpSoundRef = useRef(null);
   const backgroundMusicRef = useRef(null);
 
-  // Detectar si es móvil
+  // Inicializar sonidos
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Inicializar sonidos y música
-  useEffect(() => {
-    eatSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');    
-		gameOverSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3'); // Sonido simple de error/perdida
-    moveSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2997/2997-preview.mp3');
+    eatSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    gameOverSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2003/2003-preview.mp3');
+    comboSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2018/2018-preview.mp3');
+    powerUpSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2020/2020-preview.mp3');
+    backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Chad_Crouch/Arps/Chad_Crouch_-_Shipping_Lanes.mp3');
     
-    // Música de fondo tranquila y constante
-		backgroundMusicRef.current = new Audio('https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Chad_Crouch/Arps/Chad_Crouch_-_Shipping_Lanes.mp3');    
-    // Configurar volúmenes
-    eatSoundRef.current.volume = 0.2;
-    gameOverSoundRef.current.volume = 0.3;
-    moveSoundRef.current.volume = 0.1;
-    backgroundMusicRef.current.volume = 0.2;
+    eatSoundRef.current.volume = 0.3;
+    gameOverSoundRef.current.volume = 0.4;
+    comboSoundRef.current.volume = 0.3;
+    powerUpSoundRef.current.volume = 0.4;
+    backgroundMusicRef.current.volume = 0.15;
     backgroundMusicRef.current.loop = true;
     
     if (soundEnabled) {
@@ -80,7 +68,6 @@ export default function Game({ playerName, onGameOver, theme = 'classic' }) {
     return () => {
       if (backgroundMusicRef.current) {
         backgroundMusicRef.current.pause();
-        backgroundMusicRef.current.currentTime = 0;
       }
     };
   }, []);
@@ -102,109 +89,227 @@ export default function Game({ playerName, onGameOver, theme = 'classic' }) {
     }
   };
 
+  // Generar comida
   const generateFood = useCallback(() => {
-    let newFood;
-    do {
-      newFood = {
-        x: Math.floor(Math.random() * GRID_SIZE),
-        y: Math.floor(Math.random() * GRID_SIZE)
-      };
-    } while (snake.some(segment => segment.x === newFood.x && segment.y === newFood.y));
-    return newFood;
+    const newFoodItems = [];
+    const count = 5;
+    for (let i = 0; i < count; i++) {
+      let newFood;
+      let attempts = 0;
+      do {
+        newFood = {
+          x: Math.floor(Math.random() * GRID_SIZE),
+          y: Math.floor(Math.random() * GRID_SIZE),
+          type: Math.random() > 0.7 ? 'special' : 'normal',
+          id: Date.now() + i + Math.random()
+        };
+        attempts++;
+        // Verificar que no esté en la serpiente ni en comida existente
+      } while (
+        attempts < 100 && 
+        (snake.some(segment => segment.x === newFood.x && segment.y === newFood.y) ||
+         newFoodItems.some(f => f.x === newFood.x && f.y === newFood.y))
+      );
+      if (attempts < 100) {
+        newFoodItems.push(newFood);
+      }
+    }
+    return newFoodItems;
   }, [snake]);
 
-  // Función para cambiar dirección
-  const changeDirection = useCallback((newDirection) => {
-    const opposite = directionRef.current.x === -newDirection.x && 
-                    directionRef.current.y === -newDirection.y;
-    if (!opposite && !gameOver && !isPaused) {
-      setDirection(newDirection);
-      directionRef.current = newDirection;
-      playSound(moveSoundRef);
-    }
-  }, [gameOver, isPaused]);
-
-  // Controles de teclado
+  // Inicializar comida
   useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (e.key === ' ') {
+    setFood(generateFood());
+  }, []);
+
+  // Crear partículas
+  const createParticles = (x, y, color, count = 10) => {
+    const newParticles = [];
+    for (let i = 0; i < count; i++) {
+      newParticles.push({
+        x: x * CELL_SIZE + CELL_SIZE / 2,
+        y: y * CELL_SIZE + CELL_SIZE / 2,
+        vx: (Math.random() - 0.5) * 6,
+        vy: (Math.random() - 0.5) * 6,
+        life: 1,
+        color,
+        size: Math.random() * 5 + 2
+      });
+    }
+    setParticles(prev => [...prev, ...newParticles]);
+  };
+
+  // Actualizar partículas
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setParticles(prev => prev
+        .map(p => ({
+          ...p,
+          x: p.x + p.vx,
+          y: p.y + p.vy,
+          life: p.life - 0.03,
+          vy: p.vy + 0.15
+        }))
+        .filter(p => p.life > 0)
+      );
+    }, 16);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Activar efecto
+  const activateEffect = (type, duration = 5000) => {
+    const effect = { type, endTime: Date.now() + duration };
+    setActiveEffects(prev => [...prev.filter(e => e.type !== type), effect]);
+    
+    setTimeout(() => {
+      setActiveEffects(prev => prev.filter(e => e.type !== type));
+    }, duration);
+  };
+
+  const isEffectActive = (type) => {
+    return activeEffects.some(e => e.type === type && e.endTime > Date.now());
+  };
+
+  // Controles de teclado MEJORADOS
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (gameOver) return;
+
+      if (e.key === ' ' || e.key === 'Escape') {
         e.preventDefault();
         setIsPaused(prev => !prev);
         return;
       }
 
       if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
         setSoundEnabled(prev => !prev);
         return;
       }
 
+      // Cambio de skin con números
+      const skinKeys = { '1': 'neon', '2': 'fire', '3': 'toxic', '4': 'galaxy', '5': 'gold' };
+      if (skinKeys[e.key]) {
+        setSkin(skinKeys[e.key]);
+        return;
+      }
+
       const keyMap = {
-        ArrowUp: { x: 0, y: -1 },
-        ArrowDown: { x: 0, y: 1 },
-        ArrowLeft: { x: -1, y: 0 },
-        ArrowRight: { x: 1, y: 0 },
-        w: { x: 0, y: -1 },
-        s: { x: 0, y: 1 },
-        a: { x: -1, y: 0 },
-        d: { x: 1, y: 0 }
+        'ArrowUp': { x: 0, y: -1 },
+        'ArrowDown': { x: 0, y: 1 },
+        'ArrowLeft': { x: -1, y: 0 },
+        'ArrowRight': { x: 1, y: 0 },
+        'w': { x: 0, y: -1 },
+        'W': { x: 0, y: -1 },
+        's': { x: 0, y: 1 },
+        'S': { x: 0, y: 1 },
+        'a': { x: -1, y: 0 },
+        'A': { x: -1, y: 0 },
+        'd': { x: 1, y: 0 },
+        'D': { x: 1, y: 0 }
       };
 
-      const newDirection = keyMap[e.key];
-      if (newDirection) {
-        changeDirection(newDirection);
+      const newDir = keyMap[e.key];
+      if (newDir) {
+        e.preventDefault();
+        mouseMode.current = false;
+        
+        const currentDir = directionRef.current;
+        const isOpposite = (currentDir.x === -newDir.x && currentDir.y === -newDir.y) &&
+                          (currentDir.x !== 0 || currentDir.y !== 0);
+        
+        if (!isOpposite && !isPaused) {
+          nextDirectionRef.current = newDir;
+        }
       }
     };
 
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [changeDirection]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameOver, isPaused]);
 
-  // Controles táctiles mejorados
-  const [touchStart, setTouchStart] = useState(null);
-
-  const handleTouchStart = (e) => {
-    e.preventDefault();
-    setTouchStart({
-      x: e.touches[0].clientX,
-      y: e.touches[0].clientY
-    });
-  };
-
-  const handleTouchMove = (e) => {
-    e.preventDefault();
-  };
-
-  const handleTouchEnd = (e) => {
-    e.preventDefault();
-    if (!touchStart) return;
-
-    const touchEnd = {
-      x: e.changedTouches[0].clientX,
-      y: e.changedTouches[0].clientY
+  // Modo mouse/touch
+  const handleMouseMove = useCallback((e) => {
+    if (gameOver || isPaused) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    mousePos.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
     };
+    mouseMode.current = true;
+  }, [gameOver, isPaused]);
 
-    const diffX = touchEnd.x - touchStart.x;
-    const diffY = touchEnd.y - touchStart.y;
-    const minSwipeDistance = 30;
+  const handleTouchMove = useCallback((e) => {
+    if (gameOver || isPaused) return;
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const touch = e.touches[0];
+    touchPos.current = {
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top
+    };
+    mouseMode.current = true;
+  }, [gameOver, isPaused]);
 
-    if (Math.abs(diffX) < minSwipeDistance && Math.abs(diffY) < minSwipeDistance) {
-      setTouchStart(null);
-      return;
-    }
+  const handleTouchEnd = useCallback(() => {
+    touchPos.current = null;
+  }, []);
 
-    if (Math.abs(diffX) > Math.abs(diffY)) {
-      changeDirection(diffX > 0 ? { x: 1, y: 0 } : { x: -1, y: 0 });
-    } else {
-      changeDirection(diffY > 0 ? { x: 0, y: 1 } : { x: 0, y: -1 });
-    }
+  // Calcular dirección del mouse
+  useEffect(() => {
+    const updateDirection = () => {
+      if (gameOver || isPaused || !mouseMode.current) return;
+      
+      const pos = touchPos.current || mousePos.current;
+      if (!pos) return;
+      
+      const head = snake[0];
+      if (!head) return;
+      
+      const headPixelX = head.x * CELL_SIZE + CELL_SIZE / 2;
+      const headPixelY = head.y * CELL_SIZE + CELL_SIZE / 2;
+      
+      const dx = pos.x - headPixelX;
+      const dy = pos.y - headPixelY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance > 20) {
+        const angle = Math.atan2(dy, dx);
+        const deg = angle * 180 / Math.PI;
+        
+        let newDir;
+        if (deg >= -45 && deg < 45) newDir = { x: 1, y: 0 };
+        else if (deg >= 45 && deg < 135) newDir = { x: 0, y: 1 };
+        else if (deg >= 135 || deg < -135) newDir = { x: -1, y: 0 };
+        else newDir = { x: 0, y: -1 };
+        
+        const currentDir = directionRef.current;
+        const isOpposite = (currentDir.x === -newDir.x && currentDir.y === -newDir.y);
+        
+        if (!isOpposite) {
+          nextDirectionRef.current = newDir;
+        }
+      }
+    };
+    
+    const interval = setInterval(updateDirection, 50);
+    return () => clearInterval(interval);
+  }, [snake, gameOver, isPaused]);
 
-    setTouchStart(null);
-  };
-
+  // Loop principal del juego
   useEffect(() => {
     if (gameOver || isPaused) return;
 
     const gameLoop = setInterval(() => {
+      // Aplicar la siguiente dirección
+      directionRef.current = nextDirectionRef.current;
+
       setSnake(prevSnake => {
         const head = prevSnake[0];
         const newHead = {
@@ -212,177 +317,457 @@ export default function Game({ playerName, onGameOver, theme = 'classic' }) {
           y: head.y + directionRef.current.y
         };
 
-        if (newHead.x < 0 || newHead.x >= GRID_SIZE || 
-            newHead.y < 0 || newHead.y >= GRID_SIZE) {
-          setGameOver(true);
-          playSound(gameOverSoundRef);
-          if (backgroundMusicRef.current) {
-            backgroundMusicRef.current.pause();
+        // Colisión con paredes
+        if (!isEffectActive('invincible')) {
+          if (newHead.x < 0 || newHead.x >= GRID_SIZE || newHead.y < 0 || newHead.y >= GRID_SIZE) {
+            setGameOver(true);
+            playSound(gameOverSoundRef);
+            backgroundMusicRef.current?.pause();
+            createParticles(head.x, head.y, '#ff0000', 30); // Explosión roja
+            setTimeout(() => onGameOver(score), 800);
+            return prevSnake;
           }
-          setTimeout(() => onGameOver(score), 500);
-          return prevSnake;
-        }
 
-        if (prevSnake.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
-          setGameOver(true);
-          playSound(gameOverSoundRef);
-          if (backgroundMusicRef.current) {
-            backgroundMusicRef.current.pause();
+          // Colisión consigo mismo (debe tener al menos 4 segmentos para chocar)
+          if (prevSnake.length >= 4) {
+            const collision = prevSnake.slice(1).some(segment => 
+              segment.x === newHead.x && segment.y === newHead.y
+            );
+            
+            if (collision) {
+              setGameOver(true);
+              playSound(gameOverSoundRef);
+              backgroundMusicRef.current?.pause();
+              createParticles(newHead.x, newHead.y, '#ff0000', 30); // Explosión roja
+              setTimeout(() => onGameOver(score), 800);
+              return prevSnake;
+            }
           }
-          setTimeout(() => onGameOver(score), 500);
-          return prevSnake;
         }
 
         const newSnake = [newHead, ...prevSnake];
 
-        if (newHead.x === food.x && newHead.y === food.y) {
-          setScore(prev => prev + 10);
-          setFood(generateFood());
-          setSpeed(prev => Math.max(50, prev - 2));
-          playSound(eatSoundRef);
+        // Verificar comida
+        let foodEaten = false;
+        
+        setFood(prevFood => {
+          const remainingFood = prevFood.filter(f => {
+            if (f.x === newHead.x && f.y === newHead.y) {
+              foodEaten = true;
+              // Agregar a la cola de crecimiento
+              setGrowthQueue(prev => prev + 1);
+              
+              const points = f.type === 'special' ? 25 : 10;
+              const multiplier = isEffectActive('doublePoints') ? 2 : 1;
+              setScore(prev => prev + points * multiplier);
+              setCombo(prev => prev + 1);
+              
+              const color = f.type === 'special' ? '#ffd700' : '#00ff88';
+              createParticles(f.x, f.y, color, 20);
+              playSound(eatSoundRef);
+              
+              if (combo > 0 && combo % 5 === 0) {
+                playSound(comboSoundRef);
+              }
+              
+              return false;
+            }
+            return true;
+          });
+
+          if (foodEaten && remainingFood.length < 3) {
+            return [...remainingFood, ...generateFood()];
+          }
+          return remainingFood;
+        });
+
+        // Verificar power-ups
+        setPowerUps(prevPowerUps => {
+          return prevPowerUps.filter(p => {
+            if (p.x === newHead.x && p.y === newHead.y) {
+              // Power-up también hace crecer
+              setGrowthQueue(prev => prev + 1);
+              
+              playSound(powerUpSoundRef);
+              createParticles(p.x, p.y, '#ff00ff', 25);
+              setScore(prev => prev + 50);
+              
+              if (p.type === 'invincible') {
+                activateEffect('invincible', 5000);
+              } else if (p.type === 'speed') {
+                // No modificar velocidad, solo dar puntos
+                setScore(prev => prev + 30);
+              } else if (p.type === 'doublePoints') {
+                activateEffect('doublePoints', 8000);
+              } else if (p.type === 'freeze') {
+                // No modificar velocidad, solo dar puntos
+                setScore(prev => prev + 30);
+              }
+              
+              return false;
+            }
+            return true;
+          });
+        });
+
+        // Aplicar crecimiento desde la cola
+        if (growthQueue > 0) {
+          // Si hay crecimiento pendiente, NO remover la cola
+          setGrowthQueue(prev => prev - 1);
+          // No hacer pop(), la serpiente crece
         } else {
+          // No hay crecimiento pendiente, remover cola (movimiento normal)
           newSnake.pop();
+        }
+        
+        if (!foodEaten) {
+          setCombo(0);
+        }
+
+        // Generar power-ups
+        if (Math.random() > 0.985 && powerUps.length < 2) {
+          const types = ['invincible', 'speed', 'doublePoints', 'freeze'];
+          const newPowerUp = {
+            x: Math.floor(Math.random() * GRID_SIZE),
+            y: Math.floor(Math.random() * GRID_SIZE),
+            type: types[Math.floor(Math.random() * types.length)],
+            id: Date.now() + Math.random()
+          };
+          setPowerUps(prev => [...prev, newPowerUp]);
         }
 
         return newSnake;
       });
-    }, speed);
+    }, isEffectActive('freeze') ? baseSpeed * 2 : baseSpeed);
 
     return () => clearInterval(gameLoop);
-  }, [gameOver, isPaused, food, score, speed, onGameOver, generateFood, soundEnabled]);
+  }, [gameOver, isPaused, score, baseSpeed, onGameOver, generateFood, combo, powerUps, growthQueue]);
+
+  // Renderizado con Canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const width = GRID_SIZE * CELL_SIZE;
+    const height = GRID_SIZE * CELL_SIZE;
+
+    // Fondo con gradiente
+    const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+    bgGradient.addColorStop(0, '#0a0a1a');
+    bgGradient.addColorStop(1, '#1a0a2a');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, height);
+
+    // Grid
+    ctx.strokeStyle = 'rgba(100, 100, 255, 0.05)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= GRID_SIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * CELL_SIZE, 0);
+      ctx.lineTo(i * CELL_SIZE, height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * CELL_SIZE);
+      ctx.lineTo(width, i * CELL_SIZE);
+      ctx.stroke();
+    }
+
+    // Comida
+    food.forEach(f => {
+      const pulse = Math.sin(Date.now() / 200) * 2;
+      const gradient = ctx.createRadialGradient(
+        f.x * CELL_SIZE + CELL_SIZE / 2,
+        f.y * CELL_SIZE + CELL_SIZE / 2,
+        0,
+        f.x * CELL_SIZE + CELL_SIZE / 2,
+        f.y * CELL_SIZE + CELL_SIZE / 2,
+        CELL_SIZE
+      );
+      
+      if (f.type === 'special') {
+        gradient.addColorStop(0, '#ffd700');
+        gradient.addColorStop(1, '#ff8800');
+      } else {
+        gradient.addColorStop(0, '#00ff88');
+        gradient.addColorStop(1, '#00aa55');
+      }
+      
+      ctx.fillStyle = gradient;
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = f.type === 'special' ? '#ffd700' : '#00ff88';
+      ctx.beginPath();
+      ctx.arc(
+        f.x * CELL_SIZE + CELL_SIZE / 2,
+        f.y * CELL_SIZE + CELL_SIZE / 2,
+        CELL_SIZE / 2 - 1 + pulse,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+
+    // Power-ups
+    powerUps.forEach(p => {
+      const colors = {
+        invincible: '#ff00ff',
+        speed: '#00ffff',
+        doublePoints: '#ffff00',
+        freeze: '#00aaff'
+      };
+      const icons = {
+        invincible: '⚡',
+        speed: '🚀',
+        doublePoints: '💎',
+        freeze: '❄️'
+      };
+      
+      const pulse = Math.sin(Date.now() / 150) * 3;
+      ctx.fillStyle = colors[p.type];
+      ctx.shadowBlur = 25;
+      ctx.shadowColor = colors[p.type];
+      ctx.beginPath();
+      ctx.arc(
+        p.x * CELL_SIZE + CELL_SIZE / 2,
+        p.y * CELL_SIZE + CELL_SIZE / 2,
+        CELL_SIZE / 2 + pulse,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+
+    // Serpiente con skin
+    const currentSkin = SKINS[skin];
+    snake.forEach((segment, index) => {
+      const alpha = 1 - (index / snake.length) * 0.4;
+      const size = CELL_SIZE - 2 - (index / snake.length) * 2;
+      
+      const gradient = ctx.createRadialGradient(
+        segment.x * CELL_SIZE + CELL_SIZE / 2,
+        segment.y * CELL_SIZE + CELL_SIZE / 2,
+        0,
+        segment.x * CELL_SIZE + CELL_SIZE / 2,
+        segment.y * CELL_SIZE + CELL_SIZE / 2,
+        size / 2
+      );
+      
+      if (isEffectActive('invincible')) {
+        gradient.addColorStop(0, `rgba(255, 0, 255, ${alpha})`);
+        gradient.addColorStop(1, `rgba(138, 43, 226, ${alpha})`);
+      } else {
+        const headRgb = hexToRgb(currentSkin.head);
+        const bodyRgb = hexToRgb(currentSkin.body);
+        gradient.addColorStop(0, `rgba(${headRgb.r}, ${headRgb.g}, ${headRgb.b}, ${alpha})`);
+        gradient.addColorStop(1, `rgba(${bodyRgb.r}, ${bodyRgb.g}, ${bodyRgb.b}, ${alpha})`);
+      }
+      
+      ctx.fillStyle = gradient;
+      
+      if (index === 0) {
+        ctx.shadowBlur = 25;
+        ctx.shadowColor = isEffectActive('invincible') ? '#ff00ff' : currentSkin.glow;
+        ctx.beginPath();
+        ctx.arc(
+          segment.x * CELL_SIZE + CELL_SIZE / 2,
+          segment.y * CELL_SIZE + CELL_SIZE / 2,
+          size / 2,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        
+        // Ojos
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = '#ffffff';
+        const eyeSize = 3;
+        ctx.fillRect(segment.x * CELL_SIZE + 4, segment.y * CELL_SIZE + 4, eyeSize, eyeSize);
+        ctx.fillRect(segment.x * CELL_SIZE + CELL_SIZE - 7, segment.y * CELL_SIZE + 4, eyeSize, eyeSize);
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.beginPath();
+        ctx.arc(
+          segment.x * CELL_SIZE + CELL_SIZE / 2,
+          segment.y * CELL_SIZE + CELL_SIZE / 2,
+          size / 2,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+    });
+
+    // Partículas
+    particles.forEach(p => {
+      ctx.fillStyle = `${p.color}${Math.floor(p.life * 255).toString(16).padStart(2, '0')}`;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+
+  }, [snake, food, powerUps, particles, skin, activeEffects]);
+
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : { r: 0, g: 255, b: 255 };
+  };
 
   return (
-    <div className="flex flex-col items-center gap-4 py-4">
-      <div className="flex justify-between items-center w-full max-w-md px-4">
-        <div className="text-white">
-          <span className="font-bold text-lg">{playerName}</span>
+    <div className="fixed inset-0 bg-gradient-to-br from-indigo-950 via-purple-950 to-black flex flex-col items-center justify-center overflow-hidden">
+      {/* HUD */}
+      <div className="absolute top-0 left-0 right-0 z-20 p-2 sm:p-4 flex justify-between items-start flex-wrap gap-2">
+        <div className="bg-black/40 backdrop-blur-md rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-cyan-500/30">
+          <div className="text-cyan-400 text-xs sm:text-sm font-semibold mb-1">PLAYER</div>
+          <div className="text-white text-sm sm:text-xl font-bold">{playerName}</div>
         </div>
-        <div className="text-white text-2xl font-bold">
-          🏆 {score}
+        
+        <div className="bg-black/40 backdrop-blur-md rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-purple-500/30">
+          <div className="text-purple-400 text-xs sm:text-sm font-semibold mb-1">SCORE</div>
+          <div className="text-white text-xl sm:text-3xl font-bold">{score}</div>
+          {combo > 1 && (
+            <div className="text-yellow-400 text-xs sm:text-sm font-bold animate-pulse mt-1">
+              🔥 COMBO x{combo}
+            </div>
+          )}
         </div>
-        <button
-          onClick={() => setSoundEnabled(!soundEnabled)}
-          className="text-3xl hover:scale-110 transition-transform active:scale-95"
-          title={soundEnabled ? 'Silenciar' : 'Activar sonido'}
-        >
-          {soundEnabled ? '🔊' : '🔇'}
-        </button>
+
+        <div className="bg-black/40 backdrop-blur-md rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-3 border border-green-500/30">
+          <div className="text-green-400 text-xs sm:text-sm font-semibold mb-1">LENGTH</div>
+          <div className="text-white text-xl sm:text-3xl font-bold">{snake.length}</div>
+        </div>
+
+        <div className="flex gap-2 sm:gap-3">
+          <button
+            onClick={() => setSoundEnabled(!soundEnabled)}
+            className="bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl p-2 sm:p-3 border border-white/20 hover:border-white/40 transition-all text-xl sm:text-2xl active:scale-95"
+          >
+            {soundEnabled ? '🔊' : '🔇'}
+          </button>
+          <button
+            onClick={() => setIsPaused(!isPaused)}
+            className="bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl p-2 sm:p-3 border border-white/20 hover:border-white/40 transition-all text-xl sm:text-2xl active:scale-95"
+          >
+            {isPaused ? '▶️' : '⏸️'}
+          </button>
+        </div>
       </div>
 
-      <div 
-        className={`relative ${currentTheme.bg} border-4 ${currentTheme.grid} shadow-2xl touch-none`}
-        style={{ 
-          width: GRID_SIZE * CELL_SIZE, 
-          height: GRID_SIZE * CELL_SIZE 
+      {/* Status effects */}
+      <div className="absolute top-20 sm:top-24 right-2 sm:right-4 flex flex-col gap-2 z-20">
+        {isEffectActive('invincible') && (
+          <div className="bg-purple-500/30 backdrop-blur-md rounded-lg sm:rounded-xl px-2 sm:px-4 py-1 sm:py-2 border border-purple-400/50 animate-pulse">
+            <span className="text-purple-300 text-xs sm:text-sm font-bold">⚡ INVINCIBLE</span>
+          </div>
+        )}
+        {isEffectActive('doublePoints') && (
+          <div className="bg-yellow-500/30 backdrop-blur-md rounded-lg sm:rounded-xl px-2 sm:px-4 py-1 sm:py-2 border border-yellow-400/50 animate-pulse">
+            <span className="text-yellow-300 text-xs sm:text-sm font-bold">💎 2X POINTS</span>
+          </div>
+        )}
+        {isEffectActive('freeze') && (
+          <div className="bg-blue-500/30 backdrop-blur-md rounded-lg sm:rounded-xl px-2 sm:px-4 py-1 sm:py-2 border border-blue-400/50 animate-pulse">
+            <span className="text-blue-300 text-xs sm:text-sm font-bold">❄️ SLOW</span>
+          </div>
+        )}
+      </div>
+
+      {/* Skin selector */}
+      <div className="absolute top-20 sm:top-24 left-2 sm:left-4 bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl p-2 sm:p-3 border border-white/20 z-20">
+        <div className="text-white text-xs font-semibold mb-2 hidden sm:block">SKIN (1-5)</div>
+        <div className="flex gap-1 sm:gap-2">
+          {Object.keys(SKINS).map((s, i) => (
+            <button
+              key={s}
+              onClick={() => setSkin(s)}
+              className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 transition-all ${
+                skin === s ? 'border-white scale-110' : 'border-white/30'
+              }`}
+              style={{ background: `linear-gradient(135deg, ${SKINS[s].head}, ${SKINS[s].body})` }}
+              title={s}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Canvas */}
+      <canvas
+        ref={canvasRef}
+        width={GRID_SIZE * CELL_SIZE}
+        height={GRID_SIZE * CELL_SIZE}
+        className="border-4 border-cyan-500/30 rounded-lg shadow-2xl cursor-crosshair"
+        style={{
+          boxShadow: '0 0 60px rgba(0, 255, 255, 0.3), inset 0 0 60px rgba(0, 0, 0, 0.5)',
+          maxWidth: '95vw',
+          maxHeight: '70vh'
         }}
-        onTouchStart={handleTouchStart}
+        onMouseMove={handleMouseMove}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-      >
-        {snake.map((segment, index) => (
-          <div
-            key={index}
-            className={`absolute ${currentTheme.snake} ${index === 0 ? 'rounded-full' : 'rounded'}`}
-            style={{
-              left: segment.x * CELL_SIZE,
-              top: segment.y * CELL_SIZE,
-              width: CELL_SIZE - 2,
-              height: CELL_SIZE - 2
-            }}
-          />
-        ))}
+      />
 
-        <div
-          className={`absolute ${currentTheme.food} rounded-full animate-pulse`}
-          style={{
-            left: food.x * CELL_SIZE,
-            top: food.y * CELL_SIZE,
-            width: CELL_SIZE - 2,
-            height: CELL_SIZE - 2
-          }}
-        />
-
-        {gameOver && (
-          <div className="absolute inset-0 bg-black bg-opacity-75 flex items-center justify-center">
-            <div className="text-white text-center animate-bounce">
-              <h2 className="text-3xl font-bold mb-2">💀 Game Over!</h2>
-              <p className="text-xl">Score: {score}</p>
-            </div>
-          </div>
-        )}
-
-        {isPaused && !gameOver && (
-          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-            <div className="text-white text-3xl font-bold animate-pulse">⏸️ PAUSA</div>
-          </div>
-        )}
+      {/* Instrucciones */}
+      <div className="absolute bottom-2 sm:bottom-4 left-0 right-0 text-center px-2 z-20">
+        <div className="bg-black/40 backdrop-blur-md rounded-lg sm:rounded-xl px-3 sm:px-6 py-2 sm:py-3 border border-white/20 inline-block">
+          <p className="text-cyan-400 text-xs sm:text-sm font-semibold">
+            🎮 WASD/Arrows or Move Mouse/Touch • 🍎 +10 • ⭐ +25 • 💎 Power-ups • 1-5: Change Skin
+          </p>
+        </div>
       </div>
 
-      {/* Controles táctiles para móvil */}
-      {isMobile && (
-        <div className="flex flex-col items-center gap-3 mt-4">
-          <button
-            onTouchStart={(e) => {
-              e.preventDefault();
-              changeDirection({ x: 0, y: -1 });
-            }}
-            className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
-          >
-            ⬆️
-          </button>
-          <div className="flex gap-3">
-            <button
-              onTouchStart={(e) => {
-                e.preventDefault();
-                changeDirection({ x: -1, y: 0 });
-              }}
-              className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
-            >
-              ⬅️
-            </button>
-            <button
-              onTouchStart={(e) => {
-                e.preventDefault();
-                changeDirection({ x: 0, y: 1 });
-              }}
-              className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
-            >
-              ⬇️
-            </button>
-            <button
-              onTouchStart={(e) => {
-                e.preventDefault();
-                changeDirection({ x: 1, y: 0 });
-              }}
-              className="bg-white bg-opacity-20 hover:bg-opacity-30 active:bg-opacity-40 text-white font-bold w-16 h-16 rounded-lg text-3xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
-            >
-              ➡️
-            </button>
+      {/* Game Over */}
+      {gameOver && (
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-30 animate-fadeIn">
+          <div className="bg-gradient-to-br from-purple-900/90 to-pink-900/90 backdrop-blur-md rounded-2xl sm:rounded-3xl p-6 sm:p-12 border-4 border-cyan-500/50 text-center transform animate-scaleIn max-w-md mx-4">
+            <div className="text-5xl sm:text-8xl mb-4 animate-bounce">💀</div>
+            <h2 className="text-4xl sm:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-4">
+              GAME OVER
+            </h2>
+            <div className="text-white text-xl sm:text-3xl font-bold mb-2">Final Score</div>
+            <div className="text-yellow-400 text-4xl sm:text-6xl font-bold mb-6">{score}</div>
+            <div className="text-gray-300 text-lg sm:text-xl">
+              Snake Length: {snake.length}
+            </div>
           </div>
-          <button
-            onTouchStart={(e) => {
-              e.preventDefault();
-              setIsPaused(prev => !prev);
-            }}
-            className="bg-yellow-500 hover:bg-yellow-600 active:bg-yellow-700 text-white font-bold px-6 py-3 rounded-lg shadow-lg active:scale-95 transition-all mt-2"
-          >
-            {isPaused ? '▶️ Reanudar' : '⏸️ Pausar'}
-          </button>
         </div>
       )}
 
-      <div className="text-white text-sm text-center px-4">
-        {!isMobile ? (
-          <>
-            <p>🎮 Flechas/WASD | ⏸️ ESPACIO | 🔊 M para sonido</p>
-          </>
-        ) : (
-          <>
-            <p>📱 Usa los botones o desliza en el tablero</p>
-            <p className="text-xs opacity-75 mt-1">Desliza arriba/abajo/izq/der para moverte</p>
-          </>
-        )}
-      </div>
+      {/* Pause */}
+      {isPaused && !gameOver && (
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-30">
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl sm:rounded-3xl p-8 sm:p-12 border-2 border-white/30">
+            <div className="text-white text-5xl sm:text-7xl font-bold animate-pulse">⏸️ PAUSED</div>
+            <p className="text-white/70 text-sm sm:text-base mt-4 text-center">Press SPACE or ESC to continue</p>
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes scaleIn {
+          from { transform: scale(0.8); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out;
+        }
+        .animate-scaleIn {
+          animation: scaleIn 0.4s ease-out;
+        }
+      `}</style>
     </div>
   );
 }
